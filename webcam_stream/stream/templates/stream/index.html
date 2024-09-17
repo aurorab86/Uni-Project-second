@@ -3,7 +3,7 @@
 <head>
     {% load static %}
     <meta charset="UTF-8">
-    <title>Custom Map with Moving Objects</title>
+    <title>Custom Map with Moving Objects and Drawing Function</title>
     <style>
         body {
             background-color: #f3f3f3;
@@ -11,51 +11,129 @@
             justify-content: center;
             align-items: center;
             height: 100vh;
+            flex-direction: column;
         }
         #mapCanvas {
             border: 2px solid #ccc;
+        }
+        .button-container {
+            margin-top: 20px;
+        }
+
+        /* 버튼 스타일 */
+        button {
+            padding: 10px 20px;
+            margin: 5px;
+            font-size: 16px;
+            color: white;
+            background-color: #4CAF50;  /* 기본 배경색 */
+            border: none;
+            border-radius: 8px;  /* 둥근 모서리 */
+            cursor: pointer;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);  /* 그림자 */
+            transition: background-color 0.3s ease;  /* 배경색 전환 효과 */
+        }
+        button:hover {
+            background-color: #45a049;  /* 호버 시 배경색 */
+        }
+        button:active {
+            background-color: #3e8e41;  /* 클릭 시 배경색 */
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);  /* 클릭 시 그림자 */
+        }
+
+        .coordinate-display {
+            margin-top: 20px;
+            font-size: 18px;
+            font-weight: bold;
         }
     </style>
 </head>
 <body>
     <canvas id="mapCanvas" width="640" height="640"></canvas>
 
+    <div class="button-container">
+        <button onclick="setDrawMode('line')">직선 그리기</button>
+        <button onclick="setDrawMode('curve')">곡선 그리기</button>
+        <button onclick="setDrawMode('rect')">네모 그리기</button>
+        <button onclick="setDrawMode('circle')">원 그리기</button>
+        <button onclick="setDrawMode('move')">움직이는 물체 경로 보기</button>
+        <button onclick="clearAllPaths()">모든 경로 삭제</button>
+    </div>
+
+    <!-- 좌표값을 표시할 부분 -->
+    <div class="coordinate-display" id="coordinateDisplay">
+        현재 좌표: (X: 0, Y: 0)
+    </div>
+
     <script>
         const canvas = document.getElementById('mapCanvas');
         const ctx = canvas.getContext('2d');
+        const coordinateDisplay = document.getElementById('coordinateDisplay');
 
         // 지도 이미지 로드
         const mapImage = new Image();
-        mapImage.src = "{% static 'map_img.jpg' %}"; // 커스텀 지도 이미지 경로
+        mapImage.src = "{% static 'images/your_custom_map_image.png' %}"; // 커스텀 지도 이미지 경로
 
         // 카메라(고정된 마커) 위치 설정
-        const cameraPosition = { x: 320, y: 320 }; // 예시로 중앙에 카메라 위치 설정
+        const cameraPosition = { x: 320, y: 320 }; // 카메라 위치 예시
 
         // 카메라 마커 이미지 로드
         const cameraMarkerImage = new Image();
         cameraMarkerImage.src = 'https://cdn-icons-png.flaticon.com/512/747/747376.png'; // 고정 카메라 마커 이미지 URL
 
         // 움직이는 물체의 경로와 마커 정보
-        const path = [];  // 물체의 경로 저장
+        let path = [];  // 물체의 경로 저장 (움직이는 물체의 경로를 저장)
         const movingMarkerImage = new Image();
         movingMarkerImage.src = 'https://cdn-icons-png.flaticon.com/512/7334/7334593.png'; // 움직이는 물체 마커 이미지 URL
         let objectPosition = { x: 100, y: 100 };  // 물체의 초기 위치
+
+        let isDrawing = false;  // 사용자가 그리고 있는지 여부
+        let startX = 0, startY = 0;  // 그리기 시작 좌표
+        let drawMode = 'move';  // 기본 모드는 물체 경로 보기
+        let drawnPaths = [];  // 사용자가 그린 경로를 저장할 배열
+
+        // 도형을 그릴 때 사용되는 변수
+        let currentShape = null; // 사용자가 그리고 있는 도형의 정보를 저장
 
         mapImage.onload = function() {
             // 지도 이미지가 로드되면 캔버스에 그리기
             drawMapAndPath();
         };
 
+        // 그리기 모드 설정 함수
+        function setDrawMode(mode) {
+            drawMode = mode;  // 직선, 곡선, 네모, 원 또는 물체 경로 보기 모드 선택
+        }
+
         // 경로와 마커를 그리는 함수
         function drawMapAndPath() {
-            // 배경 지도와 경로, 마커 모두 다시 그리기
+            // 캔버스 클리어 및 지도 그리기
             ctx.clearRect(0, 0, canvas.width, canvas.height);
             ctx.drawImage(mapImage, 0, 0, canvas.width, canvas.height);
 
             // 고정 카메라 마커 그리기
-            ctx.drawImage(cameraMarkerImage, cameraPosition.x - 15, cameraPosition.y - 15, 30, 30); // 마커의 중앙이 좌표에 맞도록 조정
+            ctx.drawImage(cameraMarkerImage, cameraPosition.x - 15, cameraPosition.y - 15, 30, 30); // 카메라 마커 위치 조정
 
-            // 경로 그리기
+            // 사용자가 그린 모든 경로 그리기
+            drawnPaths.forEach((path) => {
+                ctx.beginPath();
+                if (path.type === 'line') {
+                    ctx.moveTo(path.startX, path.startY);
+                    ctx.lineTo(path.endX, path.endY);
+                } else if (path.type === 'curve') {
+                    ctx.moveTo(path.startX, path.startY);
+                    ctx.quadraticCurveTo(path.controlX, path.controlY, path.endX, path.endY);
+                } else if (path.type === 'rect') {
+                    ctx.rect(path.startX, path.startY, path.width, path.height);
+                } else if (path.type === 'circle') {
+                    ctx.arc(path.centerX, path.centerY, path.radius, 0, Math.PI * 2);
+                }
+                ctx.strokeStyle = path.strokeStyle;
+                ctx.lineWidth = 3;
+                ctx.stroke();
+            });
+
+            // 물체가 지나간 경로 그리기 (path 배열에 저장된 경로)
             if (path.length > 1) {
                 ctx.beginPath();
                 ctx.moveTo(path[0].x, path[0].y);
@@ -67,26 +145,113 @@
                 ctx.stroke();
             }
 
-            // 움직이는 물체 마커 그리기 (마커를 경로의 현재 위치에 표시)
-            ctx.drawImage(movingMarkerImage, objectPosition.x - 10, objectPosition.y - 10, 20, 20); // 물체 마커 그리기
+            // 움직이는 물체 마커 그리기
+            ctx.drawImage(movingMarkerImage, objectPosition.x - 10, objectPosition.y - 10, 20, 20);
         }
 
         // 물체의 위치를 업데이트하는 함수
         function updateObjectPosition(newPosition) {
-            path.push(newPosition);  // 새로운 좌표를 경로에 추가
+            path.push(newPosition);  // 새로운 좌표를 경로에 추가 (경로 배열에 저장)
             objectPosition = newPosition;  // 물체의 현재 위치 업데이트
             drawMapAndPath();  // 경로와 마커 다시 그리기
+            updateCoordinateDisplay(newPosition);  // 좌표 표시 업데이트
+        }
+
+        // 좌표 표시 업데이트 함수
+        function updateCoordinateDisplay(position) {
+            coordinateDisplay.textContent = `현재 좌표: (X: ${position.x}, Y: ${position.y})`;
         }
 
         // 주기적으로 서버에서 좌표 받아와서 물체의 위치 업데이트
         setInterval(function() {
-            fetch('/get_object_location/')  // 서버로부터 좌표 받아오기
-                .then(response => response.json())
-                .then(data => {
-                    const newPos = { x: data.x, y: data.y };  // 받은 좌표로 객체 생성
-                    updateObjectPosition(newPos);  // 물체 위치 업데이트
-                });
+            if (drawMode === 'move' || drawMode !== 'move') {  // 항상 물체 경로를 업데이트
+                fetch('/get_object_location/')  // 서버로부터 좌표 받아오기
+                    .then(response => response.json())
+                    .then(data => {
+                        const newPos = { x: data.x, y: data.y };  // 받은 좌표로 객체 생성
+                        updateObjectPosition(newPos);  // 물체 위치 업데이트
+                    });
+            }
         }, 2000);  // 2초마다 좌표 업데이트
+
+        // 마우스 클릭으로 그리기 시작
+        canvas.addEventListener('mousedown', function(event) {
+            if (drawMode !== 'move') {
+                isDrawing = true;
+                const rect = canvas.getBoundingClientRect();
+                startX = event.clientX - rect.left;
+                startY = event.clientY - rect.top;
+                currentShape = { type: drawMode, startX, startY };  // 도형의 정보를 저장
+            }
+        });
+
+        // 마우스 드래그로 도형 그리기
+        canvas.addEventListener('mousemove', function(event) {
+            if (isDrawing && drawMode !== 'move') {
+                const rect = canvas.getBoundingClientRect();
+                const currentX = event.clientX - rect.left;
+                const currentY = event.clientY - rect.top;
+
+                // 이전 상태 초기화 후 지도와 물체 경로 다시 그리기
+                drawMapAndPath();
+
+                // 도형 그리기 모드에 따라 현재 도형을 그리기
+                ctx.beginPath();
+                if (drawMode === 'line') {
+                    ctx.moveTo(startX, startY);
+                    ctx.lineTo(currentX, currentY);
+                    ctx.strokeStyle = '#FF0000';
+                    ctx.lineWidth = 3;
+                    ctx.stroke();
+                    currentShape = { type: 'line', startX, startY, endX: currentX, endY: currentY, strokeStyle: '#FF0000' };
+                } else if (drawMode === 'curve') {
+                    const controlX = (startX + currentX) / 2;
+                    const controlY = startY - 50;
+                    ctx.moveTo(startX, startY);
+                    ctx.quadraticCurveTo(controlX, controlY, currentX, currentY);
+                    ctx.strokeStyle = '#00FF00';
+                    ctx.lineWidth = 3;
+                    ctx.stroke();
+                    currentShape = { type: 'curve', startX, startY, controlX, controlY, endX: currentX, endY: currentY, strokeStyle: '#00FF00' };
+                } else if (drawMode === 'rect') {
+                    const width = currentX - startX;
+                    const height = currentY - startY;
+                    ctx.rect(startX, startY, width, height);
+                    ctx.strokeStyle = '#0000FF';
+                    ctx.lineWidth = 3;
+                    ctx.stroke();
+                    currentShape = { type: 'rect', startX, startY, width, height, strokeStyle: '#0000FF' };
+                } else if (drawMode === 'circle') {
+                    const radius = Math.sqrt(Math.pow(currentX - startX, 2) + Math.pow(currentY - startY, 2));
+                    ctx.arc(startX, startY, radius, 0, Math.PI * 2);
+                    ctx.strokeStyle = '#FF00FF';
+                    ctx.lineWidth = 3;
+                    ctx.stroke();
+                    currentShape = { type: 'circle', centerX: startX, centerY: startY, radius, strokeStyle: '#FF00FF' };
+                }
+            }
+        });
+
+        // 마우스를 떼면 그리기 종료 및 경로 저장
+        canvas.addEventListener('mouseup', function() {
+            if (isDrawing && drawMode !== 'move') {
+                drawnPaths.push(currentShape);  // 그린 도형을 저장
+                isDrawing = false;
+                currentShape = null;  // 현재 도형을 초기화
+            }
+        });
+
+        // 마우스가 캔버스 밖으로 나갔을 때 그리기 종료
+        canvas.addEventListener('mouseleave', function() {
+            isDrawing = false;
+        });
+
+        // 모든 경로 삭제 함수
+        function clearAllPaths() {
+            drawnPaths = [];  // 저장된 경로 배열 초기화
+            path = [];  // 물체 경로 초기화
+            drawMapAndPath();  // 캔버스 다시 그리기
+        }
     </script>
 </body>
 </html>
